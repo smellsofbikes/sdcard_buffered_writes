@@ -1,0 +1,82 @@
+#include <SD.h>
+
+#define Red 6
+#define Blue 8
+#define Green 7
+#define BUFFSIZE 512
+#define chipSelect 10
+
+char buffer[BUFFSIZE];
+char c;
+File logfile;
+int bufferidx;
+
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
+
+void setup() {
+
+  // setup-ports for LEDS and each for 1/2 second and sync to all OFF
+  pinMode( Green, OUTPUT); digitalWrite(Green, LOW); delay(500); digitalWrite(Green, HIGH);
+  pinMode( Blue,  OUTPUT); digitalWrite(Blue,  LOW); delay(500); digitalWrite(Blue,  HIGH);
+  pinMode( Red,   OUTPUT); digitalWrite(Red,   LOW); delay(500); digitalWrite(Red,   HIGH);
+
+  pinMode(10, OUTPUT);  // standard convention required for SD library
+
+  Serial.begin(9600);  // Use pins 3 Tx and 2 Rx (I/O view: pin 2 receives data to SD write)
+  delay(100);
+  Serial.print(F("Serial init at 9600 BAUD\r\n"));
+  Serial.print(F("(c) 2013 SofKinetics: Serial Data Logger\n\r"));
+
+  // see if the card is present and can be initialized:
+  if (!SD.begin(chipSelect)) {
+    Serial.println(F("Card initialization failed!"));
+    // Flash Red LED to indicate error, wait 5 sec, reboot
+    int i = millis() + 5000; // 5 seconds
+    Serial.println(F("Insert card or reseat card now.  Reset pending..."));
+    do {
+        digitalWrite(Red, LOW); delay(250); digitalWrite(Red, HIGH); delay(250);
+     } while(  i > millis() );
+    Serial.println("Reset!");
+    delay(250);
+    resetFunc();  //call reset function to reboot Arduino code
+  }
+
+  // Open the SD card logfile by name, either Create, Open, Append
+  logfile = SD.open("logfile.txt", O_CREAT | O_WRITE | O_APPEND);
+  // Test to ensure the file pointer was correctly set
+  if( ! logfile ) {
+    int i = millis() + 5000; // 5 seconds
+    Serial.print(F("Could not open logfile \n\r"));
+    do {
+        digitalWrite(Red, LOW); delay(250); digitalWrite(Red, HIGH); delay(250);
+     } while( i > millis() ); // stay in error loop for 5 seconds
+    Serial.println(F("Card write failed!  Halted..."));
+    do; while(true); // halt
+    } else {
+      Serial.println(F("Writing to: europa.txt")); 
+      Serial.println(F("Ready to accept serial data..."));
+    }
+
+  // discard any random input
+  while (Serial.read() >= 0) {}
+} // setup
+
+void loop() {
+  digitalWrite(Blue,  HIGH); digitalWrite(Green, HIGH);
+  // read into program buffer, increment index
+  if (Serial.available()) {
+      digitalWrite(Green, LOW);
+      c = Serial.read();
+      buffer[bufferidx++] = c;  // Store character in array and increment index
+
+      // CR record termination or buffer full? (CR+LF is common, so don't check both)
+      // See notes section regarding this implementation:
+      if (c == '\r' || (bufferidx >= BUFFSIZE-1)) {
+        buffer[bufferidx] = 0; // terminate it with null at current index
+        digitalWrite(Green, HIGH);digitalWrite(Blue, LOW);
+        logfile.write((uint8_t *) buffer, (bufferidx + 1)); //write the program buffer to SD lib backend buffer
+        logfile.flush();
+        bufferidx = 0;     // reset buffer pointer
+      }
+  }    //if serial available
+}      // close loop
